@@ -1,0 +1,13 @@
+# 뉴스 수집
+feedparser>=6.0.11
+requests>=2.31.0
+
+# LLM 처리 (LLM_PROVIDER로 선택)
+google-genai>=1.0.0        # Gemini — 무료 티어
+anthropic>=0.40.0          # Claude — 크레딧 필요
+
+# 설정
+python-dotenv>=1.0.1
+
+# 대시보드
+streamlit>=1.40.0

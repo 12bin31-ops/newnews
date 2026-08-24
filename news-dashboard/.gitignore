@@ -1,0 +1,21 @@
+# 환경변수 / 시크릿
+.env
+
+# DB
+data/*.db
+data/*.db-journal
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# OS / 에디터
+.DS_Store
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/secrets.toml
