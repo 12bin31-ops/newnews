@@ -1,6 +1,7 @@
 # 뉴스 수집
 feedparser>=6.0.11
 requests>=2.31.0
+trafilatura>=2.0.0        # 기사 원문 본문 추출
 
 # LLM 처리 (LLM_PROVIDER로 선택)
 google-genai>=1.0.0        # Gemini — 무료 티어

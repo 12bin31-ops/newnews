@@ -5,7 +5,8 @@
 
 ## 무엇을 해주나
 
-- 구글 뉴스 RSS에서 키워드별 최신 기사 수집 (URL·제목 기준 중복 자동 제거)
+- 구글 뉴스 RSS에서 키워드별 최신 기사 수집 → **기사 원문 크롤링**
+- 같은 사안을 다룬 여러 매체 기사를 **자동으로 묶어** 하나로 표시
 - 기사마다 **한 번의 LLM 호출**로 3줄 요약 · 카테고리 · 기회/위협 태그 · 중요도(1~5) · 키워드 생성
 - **달력에서 날짜를 눌러** 그날 수집된 기사를 모아 보기
 - 그날치 기사를 묶은 **일별 브리핑** 생성 (헤드라인 + 핵심 이슈 + 챙길 것)
@@ -49,7 +50,8 @@ Python 3.11 · SQLite · Streamlit · Google Gemini (Anthropic Claude 전환 가
 ├── .github/workflows/collect-news.yml   # 매일 아침 자동 수집
 ├── PROJECT_SPEC.md
 └── news-dashboard/
-    ├── collector.py     # 구글 뉴스 RSS 수집
+    ├── clustering.py    # 같은 사안 기사 묶기
+    ├── collector.py     # 구글 뉴스 RSS 수집 + 원문 크롤링
     ├── processor.py     # LLM 분류·요약·스코어링
     ├── db.py            # SQLite CRUD, 날짜별 집계
     ├── main.py          # 수집 → 분석 → 저장 파이프라인

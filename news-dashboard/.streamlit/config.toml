@@ -9,8 +9,7 @@ secondaryBackgroundColor = "#F6F7F9"
 textColor = "#16191D"
 borderColor = "#E4E7EC"
 
-# 본문 폰트 — Streamlit이 정식으로 로드하므로 아이콘 폰트를 건드리지 않는다
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, Noto Sans KR:https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap, Malgun Gothic, 맑은 고딕, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-
-# 코드/숫자용 mono 폰트
-codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap, D2Coding, Consolas, DejaVu Sans Mono, Courier New, monospace"
+# 폰트 파일 자체는 app.py의 @import가 불러온다. 여기서는 이름만 지정한다.
+# (URL 형식은 Streamlit이 단일 폰트만 허용해 테마 로딩이 통째로 실패한다)
+font = "Inter, Noto Sans KR, Malgun Gothic, 맑은 고딕, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+codeFont = "JetBrains Mono, D2Coding, Consolas, DejaVu Sans Mono, Courier New, monospace"

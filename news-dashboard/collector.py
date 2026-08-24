@@ -1,6 +1,8 @@
 """구글 뉴스 RSS 기반 뉴스 수집기."""
 
+import concurrent.futures
 import html
+import json
 import re
 import time
 import urllib.parse
@@ -23,6 +25,13 @@ REQUEST_HEADERS = {
     )
 }
 REQUEST_TIMEOUT = 15
+
+# 구글 뉴스 RSS의 링크는 원문 주소가 아니라 리다이렉트 링크다. 게다가 HTTP
+# 리다이렉트가 아니라 JS로 이동시키므로, 구글의 URL 해석 엔드포인트를 직접 호출한다.
+GOOGLE_RESOLVE_URL = (
+    "https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je"
+)
+MIN_CONTENT_CHARS = 200  # 이보다 짧으면 본문 추출 실패로 본다
 
 # 구글 뉴스 제목은 "기사 제목 - 언론사" 형태로 오는 경우가 많다
 TITLE_SOURCE_RE = re.compile(r"\s+-\s+([^-]+)$")
@@ -140,6 +149,120 @@ def fetch_news(
             break
 
     return articles
+
+
+# ------------------------------------------------------------------ 원문 크롤링
+
+
+def resolve_google_url(google_url: str) -> Optional[str]:
+    """구글 뉴스 리다이렉트 링크에서 실제 기사 주소를 얻는다.
+
+    실패하면 None. 구글이 방식을 바꾸면 여기가 가장 먼저 깨지는 지점이다.
+    """
+    if "/articles/" not in google_url:
+        return google_url if google_url.startswith("http") else None
+
+    try:
+        article_id = google_url.split("/articles/")[1].split("?")[0]
+        page = requests.get(google_url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT).text
+        sig = re.search(r'data-n-a-sg="([^"]+)"', page)
+        ts = re.search(r'data-n-a-ts="([^"]+)"', page)
+        if not (sig and ts):
+            return None
+
+        inner = json.dumps(
+            [
+                "garturlreq",
+                [
+                    ["X", "X", ["X", "X"], None, None, 1, 1, "US:en", None, 1,
+                     None, None, None, None, None, 0, 1],
+                    "X", "X", 1, [1, 1, 1], 1, 1, None, 0, 0, None, 0,
+                ],
+                article_id, int(ts.group(1)), sig.group(1),
+            ],
+            separators=(",", ":"),
+        )
+        body = "f.req=" + urllib.parse.quote(
+            json.dumps([[["Fbv4je", inner, None, "generic"]]], separators=(",", ":"))
+        )
+        resp = requests.post(
+            GOOGLE_RESOLVE_URL,
+            headers={**REQUEST_HEADERS,
+                     "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
+            data=body, timeout=20,
+        )
+        resp.raise_for_status()
+
+        # 응답 첫 줄은 )]}'  방어 프리픽스라 잘라낸다
+        payload = json.loads(resp.text.split("\n", 1)[-1])
+        for row in payload:
+            if len(row) > 2 and row[0] == "wrb.fr" and row[2]:
+                parsed = json.loads(row[2])          # ["garturlres", "<url>", 1]
+                if isinstance(parsed, list) and len(parsed) > 1 and parsed[1]:
+                    return parsed[1]
+    except (requests.RequestException, json.JSONDecodeError, ValueError, IndexError, KeyError):
+        return None
+    return None
+
+
+def fetch_article_text(url: str) -> Optional[str]:
+    """기사 원문 본문을 추출한다. 실패하면 None."""
+    try:
+        import trafilatura
+    except ImportError:
+        return None
+
+    try:
+        downloaded = trafilatura.fetch_url(url)
+        if not downloaded:
+            return None
+        text = trafilatura.extract(
+            downloaded, include_comments=False, include_tables=False,
+            no_fallback=False, favor_precision=True,
+        )
+    except Exception:
+        # 페이월·봇 차단·인코딩 오류 등 언론사마다 실패 양상이 제각각이다
+        return None
+
+    if not text:
+        return None
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text if len(text) >= MIN_CONTENT_CHARS else None
+
+
+def enrich_article(article: dict[str, Any]) -> dict[str, Any]:
+    """기사 1건의 원문을 가져와 url/content를 채운다.
+
+    실패해도 예외를 던지지 않는다. 원문을 못 가져오면 제목+발췌를 그대로 쓴다.
+    """
+    real_url = resolve_google_url(article["url"])
+    if real_url:
+        article["url"] = real_url
+        text = fetch_article_text(real_url)
+        if text:
+            article["content"] = text
+            article["crawled"] = True
+            return article
+
+    article["crawled"] = False
+    return article
+
+
+def enrich_all(
+    articles: list[dict[str, Any]],
+    max_workers: int = 4,
+) -> list[dict[str, Any]]:
+    """여러 기사의 원문을 병렬로 가져온다. I/O 대기가 대부분이라 병렬이 효과적이다."""
+    if not articles:
+        return articles
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(enrich_article, articles))
+
+    ok = sum(1 for a in results if a.get("crawled"))
+    print(f"  원문 확보 {ok}/{len(results)}건"
+          f" (실패 {len(results) - ok}건은 제목·발췌로 분석)")
+    return results
 
 
 def fetch_all(

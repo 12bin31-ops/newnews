@@ -31,9 +31,12 @@ TAG_TINTS = {
 
 st.markdown("""
 <style>
-/* 폰트는 .streamlit/config.toml 의 theme.font / theme.codeFont 로 로드한다.
+/* 폰트 파일 로딩. 어떤 요소에 적용할지는 .streamlit/config.toml 의
+   theme.font / theme.codeFont 가 정한다.
    여기서 font-family를 전역에 !important로 덮으면 Streamlit 아이콘 폰트
    (Material Symbols)까지 잡혀 ligature가 글자로 노출되므로 하지 않는다. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 :root {
   --sans:"Inter","Noto Sans KR","Malgun Gothic","맑은 고딕",
          -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -210,6 +213,15 @@ div[class*="st-key-nav-"] button:hover { border-color:var(--accent); color:var(-
 .brief .wt li { font-size:.82rem; color:var(--ink-2); line-height:1.68; }
 .brief .wt ul { margin:0; padding-left:1.1rem; }
 
+/* ---------- 관련 기사 ---------- */
+.rel { padding:.42rem 0; border-top:1px solid var(--line-2); }
+.rel:first-child { border-top:none; }
+.rel a { font-size:.83rem; color:var(--ink-2); text-decoration:none;
+         line-height:1.5; }
+.rel a:hover { color:var(--accent); text-decoration:underline; }
+.rel .src { font-family:var(--mono); font-size:.7rem; color:var(--ink-3);
+            margin-left:.4rem; }
+
 /* ---------- 코멘트 ---------- */
 .cmt { padding:.6rem 0; border-bottom:1px solid var(--line-2); }
 .cmt:last-child { border-bottom:none; }
@@ -260,6 +272,7 @@ def render_article(article: dict, scope: str) -> None:
     """기사 카드 하나. scope는 위젯 key 충돌을 막기 위한 접두사."""
     aid = article["id"]
     wkey = f"{scope}-{aid}"
+    related = article.get("_related") or []   # 같은 사안의 다른 매체 기사
 
     with st.container(border=True):
         st.markdown(
@@ -271,6 +284,13 @@ def render_article(article: dict, scope: str) -> None:
         src = article.get("source") or "출처 미상"
         when = fmt_dt(article.get("published_at") or article.get("collected_at"))
         st.markdown(f'<div class="card-meta">{src} · {when}</div>', unsafe_allow_html=True)
+
+        if related:
+            st.markdown(
+                f'<span class="pill" style="background:#EEF2FF;color:#3B4FCB">'
+                f'관련 {len(related) + 1}건</span>',
+                unsafe_allow_html=True,
+            )
 
         pills = "".join(
             pill(c.strip(), CATEGORY_TINTS)
@@ -306,6 +326,16 @@ def render_article(article: dict, scope: str) -> None:
                 for k in article["keywords"].split(",") if k.strip()
             )
             st.markdown(kws, unsafe_allow_html=True)
+
+        # --- 같은 사안의 다른 기사 ---
+        if related:
+            with st.expander(f"같은 사안 기사 {len(related)}건", expanded=False):
+                for r in related:
+                    st.markdown(
+                        f'<div class="rel"><a href="{r["url"]}" target="_blank">'
+                        f'{r["title"]}</a><span class="src">{r.get("source") or ""}</span></div>',
+                        unsafe_allow_html=True,
+                    )
 
         # --- 캠페인 아이디어 ---
         idea_key = f"ideas_{aid}"
@@ -355,6 +385,30 @@ def render_article(article: dict, scope: str) -> None:
                         st.warning("코멘트 내용을 입력해주세요.")
                     else:
                         st.rerun()
+
+
+def group_by_cluster(articles: list[dict]) -> list[dict]:
+    """같은 사안(cluster_id)끼리 묶어 대표 기사만 남기고, 나머지는 _related에 넣는다."""
+    buckets: dict = {}
+    for a in articles:
+        buckets.setdefault(a.get("cluster_id") or a["id"], []).append(a)
+
+    out = []
+    for cid, members in buckets.items():
+        # 대표는 분석된 기사 우선, 그다음 중요도, 그다음 본문 길이
+        members.sort(
+            key=lambda m: (bool(m.get("summary")), m.get("score") or 0,
+                           len(m.get("content") or "")),
+            reverse=True,
+        )
+        rep = dict(members[0])
+        rep["_related"] = members[1:]
+        out.append(rep)
+
+    out.sort(key=lambda a: (a.get("score") or 0,
+                            a.get("published_at") or a.get("collected_at") or ""),
+             reverse=True)
+    return out
 
 
 def render_calendar(year: int, month: int, counts: dict, selected: str) -> None:
@@ -523,11 +577,12 @@ with right:
         unsafe_allow_html=True,
     )
 
-    day_articles = db.get_articles(on_date=selected, date_basis=date_basis, **flt)
+    raw_articles = db.get_articles(on_date=selected, date_basis=date_basis, **flt)
+    day_articles = group_by_cluster(raw_articles)
 
     # 일별 브리핑
     brief_key = f"brief_{selected}_{date_basis}"
-    analyzed = [a for a in day_articles if a.get("summary")]
+    analyzed = [a for a in day_articles if a.get("summary")]  # 사안별 대표만
 
     bcol1, bcol2 = st.columns([1, 2])
     with bcol1:
@@ -564,8 +619,11 @@ with right:
                 unsafe_allow_html=True,
             )
 
-    st.markdown(f'<div class="seclabel">기사 {len(day_articles)}건 · 중요도 순</div>',
-                unsafe_allow_html=True)
+    merged = len(raw_articles) - len(day_articles)
+    label = f"사안 {len(day_articles)}건 · 중요도 순"
+    if merged:
+        label += f" (같은 사안 {merged}건 묶음)"
+    st.markdown(f'<div class="seclabel">{label}</div>', unsafe_allow_html=True)
 
     if not day_articles:
         st.info("이 날짜에 조건을 만족하는 기사가 없습니다.")

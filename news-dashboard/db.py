@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS articles (
     source          TEXT,
     published_at    TEXT,
     collected_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    content         TEXT,
+    cluster_id      INTEGER,
     summary         TEXT,
     category        TEXT,
     category_reason TEXT,
@@ -54,14 +56,29 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at)",
     "CREATE INDEX IF NOT EXISTS idx_articles_tag ON articles(tag)",
     "CREATE INDEX IF NOT EXISTS idx_comments_article ON comments(article_id)",
+    "CREATE INDEX IF NOT EXISTS idx_articles_cluster ON articles(cluster_id)",
 ]
 
 
+# 나중에 추가된 컬럼들 — 기존 DB에도 안전하게 붙인다
+MIGRATIONS = {
+    "content": "ALTER TABLE articles ADD COLUMN content TEXT",
+    "cluster_id": "ALTER TABLE articles ADD COLUMN cluster_id INTEGER",
+}
+
+
 def init_db() -> None:
-    """테이블이 없으면 생성한다. 여러 번 호출해도 안전."""
+    """테이블이 없으면 생성하고, 누락된 컬럼이 있으면 추가한다. 여러 번 호출해도 안전."""
     with get_connection() as conn:
         conn.execute(CREATE_ARTICLES)
         conn.execute(CREATE_COMMENTS)
+
+        # 인덱스보다 먼저 — 나중에 추가된 컬럼을 참조하는 인덱스가 있다
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(articles)")}
+        for column, ddl in MIGRATIONS.items():
+            if column not in existing:
+                conn.execute(ddl)
+
         for stmt in CREATE_INDEXES:
             conn.execute(stmt)
 
@@ -82,7 +99,7 @@ def _date_expr(basis: str) -> str:
 
 
 ARTICLE_FIELDS = [
-    "title", "url", "source", "published_at", "collected_at",
+    "title", "url", "source", "published_at", "collected_at", "content",
     "summary", "category", "category_reason", "tag", "score", "keywords",
 ]
 
@@ -173,6 +190,34 @@ def get_articles(
 
     with get_connection() as conn:
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def set_cluster_ids(mapping: dict[int, int]) -> int:
+    """기사 id → 대표 기사 id 매핑을 저장한다."""
+    if not mapping:
+        return 0
+    with get_connection() as conn:
+        conn.executemany(
+            "UPDATE articles SET cluster_id = ? WHERE id = ?",
+            [(rep, aid) for aid, rep in mapping.items()],
+        )
+    return len(mapping)
+
+
+def update_article_content(article_id: int, url: str, content: str) -> bool:
+    """크롤링으로 얻은 실제 URL과 본문을 기존 기사에 채워 넣는다."""
+    with get_connection() as conn:
+        try:
+            cur = conn.execute(
+                "UPDATE articles SET url = ?, content = ? WHERE id = ?",
+                (url, content, article_id),
+            )
+        except sqlite3.IntegrityError:
+            # 해석된 URL이 다른 기사와 겹치면 본문만 채운다
+            cur = conn.execute(
+                "UPDATE articles SET content = ? WHERE id = ?", (content, article_id)
+            )
+        return cur.rowcount > 0
 
 
 def update_article_analysis(article_id: int, analysis: dict[str, Any]) -> bool:
