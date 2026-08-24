@@ -113,6 +113,50 @@ python main.py --no-llm                     # 수집만 (무료)
 
 ---
 
+## 자동 수집 (GitHub Actions)
+
+매일 아침 07:00 KST에 뉴스를 자동 수집하고 결과를 저장소에 커밋합니다.
+워크플로: [.github/workflows/collect-news.yml](../.github/workflows/collect-news.yml)
+
+### 설정 방법
+
+1. 이 저장소를 GitHub에 푸시합니다.
+2. **Settings → Secrets and variables → Actions → New repository secret**
+   - Name: `GEMINI_API_KEY`
+   - Value: [AI Studio](https://aistudio.google.com/apikey)에서 발급받은 키
+3. **Actions** 탭 → `뉴스 자동 수집` → **Run workflow** 로 즉시 테스트합니다.
+
+선택 설정 (Variables 탭, 없으면 기본값 사용):
+
+| 이름 | 기본값 | 설명 |
+|---|---|---|
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | 사용할 모델 |
+| `LLM_REQUEST_DELAY` | `5` | 호출 간격(초). 무료 티어 한도에 걸리면 올리세요 |
+
+### 실행 시각 바꾸기
+
+`collect-news.yml`의 cron은 **UTC 기준**입니다. KST에서 9시간을 빼세요.
+
+```yaml
+- cron: "0 22 * * *"   # 07:00 KST
+- cron: "0 0 * * *"    # 09:00 KST
+- cron: "0 22 * * 1-5" # 평일만 07:00 KST
+```
+
+> GitHub의 예약 실행은 부하에 따라 몇 분에서 길게는 수십 분 늦을 수 있습니다.
+
+### DB가 저장소에 커밋되는 이유
+
+달력 뷰는 날짜가 쌓여야 의미가 있어서, Actions가 `data/news.db`를 매 실행마다
+커밋합니다. `.gitignore`에는 그대로 두어 로컬에서 실수로 커밋되는 것은 막고,
+CI에서만 `git add -f`로 의도적으로 추가합니다.
+
+**주의:** 로컬에서 `python main.py`를 돌리기 전에 `git pull`을 먼저 하세요.
+안 그러면 CI가 만든 DB와 충돌합니다. 기사 1건당 약 1.4KB로, 하루 20건씩
+1년을 모아도 10MB 수준입니다.
+
+---
+
 ## 프로젝트 구조
 
 ```
@@ -189,7 +233,7 @@ API 호출 방식과 오류 처리뿐이라, 전환해도 결과 형식은 동�
 ## 향후 계획
 
 **1차 — 자동화**
-- [ ] GitHub Actions로 매일 아침 `main.py` 자동 실행
+- [x] GitHub Actions로 매일 아침 `main.py` 자동 실행
 - [ ] 슬랙 알림 — 중요도 4~5 기사만 아침에 요약 전송
 
 **2차 — 분석 품질**
